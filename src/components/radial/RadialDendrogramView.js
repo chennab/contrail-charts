@@ -367,7 +367,11 @@ export default class RadialDendrogramView extends ChartView {
       // Estimate arc length and wheather the label will fit (default letter width is assumed to be 5px).
       n.arcLength = 6 * (n.y - this.config.get('arcLabelYOffset')) * (n.angleRange[1] - n.angleRange[0]) / 360
       n.label = '' + n.data.namePath[n.data.namePath.length - 1]
-      n.labelFits = this.config.get('arcLabelLetterWidth') * n.label.length < n.arcLength
+      let labelArcLengthDiff
+      n.labelFits = (labelArcLengthDiff = (this.config.get('arcLabelLetterWidth') * n.label.length - n.arcLength)) < 0
+      if(!n.labelFits){
+        n.labelLengthToTrim = labelArcLengthDiff / (this.config.get('arcLabelLetterWidth'))
+      }
       if (this.config.get('labelFlow') === 'perpendicular') {
         n.labelFits = (n.arcLength > 9) && ((this.config.get('innerRadius') / this.config.get('drillDownLevel')) - this.config.get('arcLabelYOffset') > this.config.get('arcLabelLetterWidth') * n.label.length)
       }
@@ -444,7 +448,8 @@ export default class RadialDendrogramView extends ChartView {
         .attr('x', this.config.get('arcLabelXOffset'))
         .attr('dy', this.config.get('arcLabelYOffset'))
       svgArcLabelsEdit.select('textPath')
-        .text((d) => (this.config.get('showArcLabels') && d.labelFits) ? d.label : '')
+        .attr('startOffset','24%')
+        .text((d) => (this.config.get('showArcLabels') && d.labelFits) ? d.label : (d.label.slice(0,-(d.labelLengthToTrim+3)) + '...'))
       svgArcLabels.exit().remove()
       // Perpendicular
       svgArcLabels = this.d3.selectAll('.arc-label.perpendicular').data(arcLabelsPerpendicularData)
