@@ -38,6 +38,9 @@ export default class RadialDendrogramView extends ChartView {
       'dblclick ribbon': '_onEvent',
       'mousemove node': '_onMousemove',
       'mouseout node': '_onMouseout',
+      'click ribbon': '_onClickLink',
+      'mousemove ribbon': '_onMousemoveLink',
+      'mouseout ribbon': '_onMouseoutLink'
     })
   }
 
@@ -106,6 +109,7 @@ export default class RadialDendrogramView extends ChartView {
           let children = this._rootNode.children
           let node = null
           const namePath = []
+          let currLeaf = leaf
           _.each(leaf.names, (name, depth) => {
             this._maxDepth = Math.max(this._maxDepth, depth + 1)
             if (depth >= this.config.get('drillDownLevel')) {
@@ -116,6 +120,7 @@ export default class RadialDendrogramView extends ChartView {
             if (!node) {
               node = {
                 name: name,
+                labelAppend:currLeaf.labelAppend,
                 namePath: namePath.slice(0),
                 children: [],
                 level: depth + 1
@@ -247,6 +252,7 @@ export default class RadialDendrogramView extends ChartView {
   * - inner edge of the source leaf arc.
   */
   _prepareRibbons () {
+    let ribbons =  this._ribbons
     this._ribbons = []
     _.each(this._links, (link) => {
       const src = link[0]
@@ -356,6 +362,19 @@ export default class RadialDendrogramView extends ChartView {
         id: src.data.linkId
       })
     })
+    if(ribbons) {
+      let selectedRibbon = _.filter(ribbons, function(ribbon) {
+        return ribbon.selected;
+      });
+      if(selectedRibbon && selectedRibbon.length > 0) {
+        _.filter(this._ribbons, function(ribbon) {
+          if(ribbon.id == selectedRibbon[0].id) {
+            ribbon.selected = true;
+            ribbon.active = true;
+          }
+        });
+      }
+    }
   }
 
   _prepareArcs () {
@@ -367,6 +386,9 @@ export default class RadialDendrogramView extends ChartView {
       // Estimate arc length and wheather the label will fit (default letter width is assumed to be 5px).
       n.arcLength = 6 * (n.y - this.config.get('arcLabelYOffset')) * (n.angleRange[1] - n.angleRange[0]) / 360
       n.label = '' + n.data.namePath[n.data.namePath.length - 1]
+      if(n.depth == 1 && n.data.labelAppend){
+        n.label += '-'+n.data.labelAppend;
+      }
       let labelArcLengthDiff
       n.labelFits = (labelArcLengthDiff = (this.config.get('arcLabelLetterWidth') * n.label.length - n.arcLength)) < 0
       if(!n.labelFits){
@@ -509,7 +531,7 @@ export default class RadialDendrogramView extends ChartView {
   _onMousemove (d, el) {
     const leaves = d.leaves()
     _.each(this._ribbons, (ribbon) => {
-      ribbon.active = Boolean(_.find(leaves, (leaf) => leaf.data.linkId === ribbon.id))
+      ribbon.active = (Boolean(_.find(leaves, (leaf) => leaf.data.linkId === ribbon.id))) ? true : ribbon.selected
     })
     this._render()
     const [left, top] = d3Selection.mouse(this._container)
@@ -519,7 +541,9 @@ export default class RadialDendrogramView extends ChartView {
 
   _onMouseout (d, el) {
     _.each(this._ribbons, (ribbon) => {
-      ribbon.active = false
+      if(!ribbon.selected) {
+        ribbon.active = false
+      }
     })
     this._render()
     actionman.fire('ToggleVisibility', this.config.get('tooltip'), false)
@@ -535,5 +559,24 @@ export default class RadialDendrogramView extends ChartView {
     }
     el.classList.remove(this.selectorClass('active'))
     super._onEvent(d, el, e)
+  }
+
+  _onClickLink (d, el, e) {
+    if(this.config.attributes && this.config.attributes.showLinkInfo
+      && typeof this.config.attributes.showLinkInfo == 'function') {
+        this.config.attributes.showLinkInfo(d, el, e,this);
+    }
+  }
+
+  _onMousemoveLink (d, el, e) {
+    if(this.config.attributes && this.config.attributes.showLinkTooltip){
+      const [left, top] = d3Selection.mouse(this._container)
+      const tooltipConfig = {left, top, container: this._container}
+      actionman.fire('ToggleVisibility', this.config.get('tooltip'), true, d.data, tooltipConfig)
+    }
+  }
+
+  _onMouseoutLink (d, el, e) {
+    actionman.fire('ToggleVisibility', this.config.get('tooltip'), false)
   }
 }
