@@ -260,12 +260,15 @@ export default class RadialDendrogramView extends ContrailChartsView {
 
   _prepareCircles () {
     this.circles = []
-    const radiusScale = d3Scale.scaleLinear().domain([0, this.params.drillDownLevel]).range([0, this.params.innerRadius]).clamp(true)
+    const radiusScale = d3Scale.scaleLinear().domain([0, 1]).range([0, this.params.innerRadius]).clamp(true)
     this.hierarchyRootNode.each((n) => {
       if (!n.parent || !n.children) {
         return
       }
-      n.y = radiusScale(n.depth)
+      n.y = radiusScale(1)
+      if(n.depth == 2 && this.params.drillDownLevel == 2) {
+          n.y -= 50
+      }
       if (this.circles.length === n.depth) {
         this.circles[n.depth] = { r: n.y }
       }
@@ -502,8 +505,65 @@ export default class RadialDendrogramView extends ContrailChartsView {
     this._prepareArcs()
   }
 
+  _getLinkPath (d, isDummyPath) {
+    const radialLine = d3Shape.radialLine().angle((d) => d[0] / 180 * Math.PI).radius((d) => d[1]).curve(this.config.get('curve'))
+    var outerPoints = d.outerPoints
+    var innerPoints = d.innerPoints
+    if (outerPoints.length == 4 && innerPoints.length == 4) {
+      outerPoints[1] = outerPoints[3];
+      innerPoints[1] = innerPoints[3];
+    }
+    var out1 = { radians: outerPoints[0][0]/180 * Math.PI, radius: outerPoints[0][1]}
+    var out2 = { radians: outerPoints[1][0]/180 * Math.PI, radius: outerPoints[1][1]}
+    var in1 = { radians: innerPoints[0][0]/180 * Math.PI, radius: innerPoints[0][1]}
+    var in2 = { radians: innerPoints[1][0]/180 * Math.PI, radius: innerPoints[1][1]}
+
+    var ribbon = (typeof d3v4 != 'undefined' ? d3v4 : d3Chord).ribbon().radius(out1.radius)
+    var radians = [out1.radians,in1.radians,out2.radians,in2.radians]
+    radians.sort();
+    if(isDummyPath) {
+      var sourceAngle = radians[0] + Math.abs(radians[1] - radians[0]) / 2
+      var targetAngle = radians[2] + Math.abs(radians[3] - radians[2]) / 2
+      return ribbon({
+        source: { startAngle: sourceAngle, endAngle: sourceAngle },
+        target: { startAngle: targetAngle, endAngle: targetAngle }
+      });
+    } else {
+      var startWidth = Math.abs(radians[0] - radians[1]) * .35
+      var endWidth = Math.abs(radians[2] - radians[3]) * .35
+      return ribbon({
+        source: { startAngle: radians[0] + startWidth, endAngle: radians [1] - startWidth },
+        target: { startAngle: radians[2] + endWidth, endAngle: radians[3] - endWidth }
+      })
+    }
+  }
+
+  _drawArrows (arrowClass, offset) {
+    var svgLinkArrow = this.d3.selectAll('.' + arrowClass).data(this.ribbons)
+    var svgLinkArrowEnter = svgLinkArrow.enter().append('text').attr('class', function (d) {
+      return arrowClass
+    })
+    svgLinkArrowEnter.append('textPath').attr('xlink:href', function (d) {
+      return '#' + d.id + '-arrow'
+    })
+    var svgLinkArrowEdit = svgLinkArrowEnter.merge(svgLinkArrow)
+    .attr('x', function (d) {
+      return '5'
+    }).attr('dy', function (d) {
+      return '5'
+    })
+    svgLinkArrowEdit.select('textPath').attr('startOffset', function (d) {
+      return offset
+    }).text(function (d) {
+      return '\uf07e'
+    })
+    svgLinkArrow.exit().remove();
+  }
+
   _render () {
     this.d3.attr('transform', `translate(${this.params.width / 2}, ${this.params.height / 2})`)
+    d3.select('svg g').selectAll(".dummyArcs").remove()
+    d3.select('svg g').selectAll(".dummyLinks").remove()
     // Circles
     const svgCircles = this.d3.selectAll('.circle').data(this.circles)
     svgCircles.enter().append('circle')
@@ -528,8 +588,9 @@ export default class RadialDendrogramView extends ContrailChartsView {
     }
     if (this.params.drawRibbons) {
       // Ribbons
-      const radialLine = d3Shape.radialLine().angle((d) => d[0] / 180 * Math.PI).radius((d) => d[1]).curve(this.config.get('curve'))
+
       const svgLinks = this.d3.selectAll('.ribbon').data(this.ribbons, (d) => d.id)
+      var viewScope = this
       svgLinks.enter().append('path')
         .attr('class', (d) => 'ribbon' + ((d.active) ? ' active' : ''))
         .merge(svgLinks)// .transition().ease(this.config.get('ease')).duration(this.params.duration)
@@ -558,72 +619,24 @@ export default class RadialDendrogramView extends ContrailChartsView {
           }*/
           // d.outerPoints.splice(1,0,getMidPoint(d.outerPoints));
           // d.innerPoints.splice(1,0,getMidPoint(d.innerPoints));
-
-          var outerPoints = d.outerPoints
-          var innerPoints = d.innerPoints
-
-          if(outerPoints.length == 2 && innerPoints.length == 2) {
-            var out1 = { radians: outerPoints[0][0]/180 * Math.PI, radius: outerPoints[0][1]},
-                    out2 = { radians: outerPoints[1][0]/180 * Math.PI, radius: outerPoints[1][1]};
-            var in1 = { radians: innerPoints[0][0]/180 * Math.PI, radius: innerPoints[0][1]},
-                    in2 = { radians: innerPoints[1][0]/180 * Math.PI, radius: innerPoints[1][1]};
-
-            var ribbon = (typeof d3v4 != 'undefined' ? d3v4 : d3Chord).ribbon().radius(out1.radius);
-            var radians = [out1.radians,in1.radians,out2.radians,in2.radians];
-            radians.sort();
-            //Adding 10% buffer
-            var startWidth = Math.abs(radians[0]-radians[1])*.35,
-              endWidth = Math.abs(radians[2]-radians[3])*.35;
-            return ribbon({
-                source: {startAngle: radians[0]+startWidth,endAngle:radians[1]-startWidth},
-                target: {startAngle: radians[2]+endWidth,endAngle:radians[3]-endWidth}
-            });
-            return ribbon({
-                source: {startAngle: out1.radians,endAngle:in1.radians},
-                target: {startAngle: Math.min(out2.radians,in2.radians),endAngle:Math.max(out2.radians,in2.radians)}
-            });
+          return this._getLinkPath(d)
+        }).each(function(d, i) {
+          // Adding dummy paths to draw arrows
+          if (viewScope.params.showLinkDirection) {
+           var newPath = viewScope._getLinkPath(d, true)
+           d3.select('svg g').append("path").attr("class", "dummyLinks")
+            .attr("id", function() {
+              return d.id + '-arrow'
+            }).attr("d", newPath).style("fill", "none")
           }
-
-          if (outerPoints.length == 4 && innerPoints.length == 4) {
-            outerPoints = _.map(outerPoints, _.clone)
-            innerPoints = _.map(innerPoints, _.clone)
-            var percentage = .25;
-            outerPoints[0][0] = outerPoints[0][0] + (Math.abs(outerPoints[0][0] - innerPoints[3][0]) * percentage);
-            outerPoints[1][0] = outerPoints[1][0] + (Math.abs(outerPoints[1][0] - innerPoints[2][0]) * percentage);
-            outerPoints[2][0] = outerPoints[2][0] - (Math.abs(outerPoints[2][0] - innerPoints[1][0]) * percentage);
-            outerPoints[3][0] = outerPoints[3][0] - (Math.abs(outerPoints[3][0] - innerPoints[0][0]) * percentage);
-
-
-            innerPoints[0][0] = innerPoints[0][0] + (Math.abs(outerPoints[0][0] - innerPoints[3][0]) * percentage);
-            innerPoints[1][0] = innerPoints[1][0] + (Math.abs(outerPoints[1][0] - innerPoints[2][0]) * percentage);
-            innerPoints[2][0] = innerPoints[2][0] - (Math.abs(outerPoints[2][0] - innerPoints[1][0]) * percentage);
-            innerPoints[3][0] = innerPoints[3][0] - (Math.abs(outerPoints[3][0] - innerPoints[0][0]) * percentage);
-          }
-          //Need to try with simple sample for debugging 
-          //Looks causing issues as it's using elliptical arc
-          /*
-          d.outerPoints = _.map(d.outerPoints,function(val,idx) {
-            var diff = Math.abs(val[0],val[1])*.1;
-            return [val[0]+diff,val[1]-diff];
-          });
-          d.innerPoints = _.map(d.innerPoints,function(val,idx) {
-            var diff = Math.abs(val[0],val[1])*.1;
-            return [val[0]+diff,val[1]-diff];
-          });
-          */
-
-          const outerPath = radialLine(outerPoints)
-          const innerPath = radialLine(innerPoints)
-          var endingStitchLargeArc = 0;
-          if(Math.abs(innerPoints.slice(-1)[0][0] - outerPoints.slice(0,1)[0][0]) > 180) {
-            endingStitchLargeArc = 1;
-          }
-          const innerStitch = 'A' + outerPoints[0][1] + ' ' + outerPoints[0][1] + ' 0 0 0 '
-          const endingStitch = 'A' + outerPoints[0][1] + ' ' + outerPoints[0][1] + ' 0 ' + endingStitchLargeArc + ' 0 ' +  radialLine([outerPoints[0]]).substr(1)
-
-          return outerPath + innerStitch + innerPath.substr(1) + endingStitch
         })
       svgLinks.exit().remove()
+
+      // Draw arrows
+      if (this.params.showLinkDirection) {
+        this._drawArrows('link-arrow-start', '')
+        this._drawArrows('link-arrow-end', '50%')
+      }
 
       // Arc labels
       const arcLabelsAlongArcData = (this.params.labelFlow === 'along-arc') ? this.arcs : []
@@ -714,7 +727,7 @@ export default class RadialDendrogramView extends ContrailChartsView {
                 newArc = "M" + newStart + "A" + middleSec + "0 " + largeArc + " 0 " + newEnd;
             }
             d3.select('svg g').append("path")
-                .attr("class", "hiddenDonutArcs")
+                .attr("class", "dummyArcs")
                 .attr("id", d.data.namePath.join('-') + '-text')
                 .attr("d", newArc)
                 .style("fill", "none");
