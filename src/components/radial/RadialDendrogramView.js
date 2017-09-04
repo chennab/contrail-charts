@@ -170,7 +170,6 @@ export default class RadialDendrogramView extends ContrailChartsView {
             if (!node) {
               node = {
                 name: name,
-                labelAppend:currLeaf.labelAppend,
                 arcType: currLeaf.type,
                 namePath: namePath.slice(0),
                 displayLabels: displayLabels.slice(0),
@@ -232,7 +231,6 @@ export default class RadialDendrogramView extends ContrailChartsView {
 
         }
       }
-      //Loop through links array and mark them as bi-directional/uni-directional
     })
     // console.log('Links: ', this.links)
   }
@@ -265,9 +263,20 @@ export default class RadialDendrogramView extends ContrailChartsView {
       if (!n.parent || !n.children) {
         return
       }
-      n.y = radiusScale(1)
-      if(n.depth == 2 && this.params.drillDownLevel == 2) {
+      //Calculating circle radius based on number of labels to be stacked
+      if(n.data.displayLabels.length) {
+        let labels = n.data.displayLabels
+        let labelsCount = labels[labels.length-1].length
+        n.y = radiusScale(1) - 15 * (labelsCount-1)
+        if (n.depth == 2 && this.params.drillDownLevel == 2) {
+          let UpperLevelLabelsCount = labels[labels.length-2].length
+          n.y -= 50 + (UpperLevelLabelsCount-1) * 15
+        }
+      } else {
+        n.y = radiusScale(1)
+        if (n.depth == 2 && this.params.drillDownLevel == 2) {
           n.y -= 50
+        }
       }
       if (this.circles.length === n.depth) {
         this.circles[n.depth] = { r: n.y }
@@ -446,11 +455,32 @@ export default class RadialDendrogramView extends ContrailChartsView {
           return false
         }
       })
+
+      //Mark link as bi-directional/uni-directional
+      let linkDirection = ''
+      if(this.config.attributes.isEndpointMatched) {
+        let viewScope = this
+        let linkChildren =  _.filter(src.data.dataChildren, function(child) {
+          return child.isClient
+        })
+        let currentEnd = _.find(linkChildren, function(child) {
+          return viewScope.config.attributes
+            .isEndpointMatched(src.data.currentNode.names, child, src.data)
+        })
+        let otherEnd = _.find(linkChildren, function(child) {
+          return viewScope.config.attributes
+            .isEndpointMatched(src.data.otherNode.names, child, src.data)
+        })
+        linkDirection = currentEnd && !otherEnd ?  'forward' :
+                        (!currentEnd && otherEnd ? 'reverse' :
+                        (currentEnd && otherEnd ? 'bidirectional' : ''))
+      }
       this.ribbons.push({
         outerPoints: outerPoints,
         innerPoints: innerPoints,
         id: src.data.linkId,
         link: [src,dst],
+        direction: linkDirection,
         linkCssClass: linkCssClass
       })
     })
@@ -479,14 +509,7 @@ export default class RadialDendrogramView extends ContrailChartsView {
       n.arcLength = 6 * (n.y - this._checkValueIsArray(this.params.arcLabelYOffset, n.height)) * (n.angleRange[1] - n.angleRange[0]) / 360
       let namePath = (n.data.displayLabels && n.data.displayLabels.length > 0) ? n.data.displayLabels : n.data.namePath
       n.label = '' + namePath[namePath.length - 1]
-      if(n.depth == 1 && n.data.labelAppend) {
-        n.label += '-'+n.data.labelAppend;
-      }
-      let labelArcLengthDiff
-      n.labelFits = (labelArcLengthDiff = (this.config.get('arcLabelLetterWidth') * n.label.length - n.arcLength)) < 0
-      if(!n.labelFits){
-        n.labelLengthToTrim = (labelArcLengthDiff + 4 * this.config.get('arcLabelLetterWidth')) / (this.config.get('arcLabelLetterWidth'))
-      }
+      n.labelFits = this.config.get('arcLabelLetterWidth') * n.label.length < n.arcLength
       if (this.config.get('labelFlow') === 'perpendicular') {
         n.labelFits = (n.arcLength > 9) && ((this.config.get('innerRadius') / this.config.get('drillDownLevel')) - this._checkValueIsArray(this.params.arcLabelYOffset, n.height) > this.config.get('arcLabelLetterWidth') * n.label.length)
       }
@@ -538,32 +561,48 @@ export default class RadialDendrogramView extends ContrailChartsView {
     }
   }
 
-  _drawArrows (arrowClass, offset) {
-    var svgLinkArrow = this.d3.selectAll('.' + arrowClass).data(this.ribbons)
-    var svgLinkArrowEnter = svgLinkArrow.enter().append('text').attr('class', function (d) {
-      return arrowClass
+  _drawArrows () {
+    let viewScope = this
+    _.each(['link-arrow-start', 'link-arrow-end'], function(arrowClass) {
+      var svgLinkArrow = viewScope.d3.selectAll('.' + arrowClass).data(viewScope.ribbons)
+      var svgLinkArrowEnter = svgLinkArrow.enter().append('text').attr('class', function (d) {
+        return arrowClass
+      })
+      svgLinkArrowEnter.append('textPath').attr('xlink:href', function (d) {
+        return '#' + d.id + '-arrow'
+      })
+      var svgLinkArrowEdit = svgLinkArrowEnter.merge(svgLinkArrow)
+      .attr('dy', function (d) { return '5' })
+      svgLinkArrowEdit.select('textPath').attr('startOffset', function (d) {
+        return (arrowClass == 'link-arrow-end') ? '51%' : '1%'
+      }).text(function (d) {
+        let arrowType = ''
+        if(d.direction == 'bidirectional') {
+         arrowType = '\uF07E'
+        } else if(d.direction == 'forward') {
+         arrowType = (arrowClass == 'link-arrow-end') ? '\uf177' : '\uf178'
+        } else if(d.direction == 'reverse') {
+         arrowType = (arrowClass == 'link-arrow-end') ? '\uf178' : '\uf177'
+        }
+        return arrowType
+      })
+      svgLinkArrow.exit().remove()
     })
-    svgLinkArrowEnter.append('textPath').attr('xlink:href', function (d) {
-      return '#' + d.id + '-arrow'
-    })
-    var svgLinkArrowEdit = svgLinkArrowEnter.merge(svgLinkArrow)
-    .attr('x', function (d) {
-      return '5'
-    }).attr('dy', function (d) {
-      return '5'
-    })
-    svgLinkArrowEdit.select('textPath').attr('startOffset', function (d) {
-      return offset
-    }).text(function (d) {
-      return '\uf07e'
-    })
-    svgLinkArrow.exit().remove();
   }
 
   _render () {
     this.d3.attr('transform', `translate(${this.params.width / 2}, ${this.params.height / 2})`)
     d3.select('svg g').selectAll(".dummyArcs").remove()
     d3.select('svg g').selectAll(".dummyLinks").remove()
+    d3.select('svg g').selectAll(".arc-label.along-arc").remove()
+    d3.selectAll('svg #patterns').remove();
+
+    //Append patterns
+    d3.select('svg').append('defs').attr('id', 'patterns')
+    .append('pattern').attr('id', 'pattern-stripe').attr('width', 4).attr('height', 4)
+    .attr('patternUnits', 'userSpaceOnUse').attr('patternTransform', 'rotate(90)')
+    .append('rect').attr('width', 1).attr('height', 4).style('fill', '#888')
+
     // Circles
     const svgCircles = this.d3.selectAll('.circle').data(this.circles)
     svgCircles.enter().append('circle')
@@ -634,8 +673,7 @@ export default class RadialDendrogramView extends ContrailChartsView {
 
       // Draw arrows
       if (this.params.showLinkDirection) {
-        this._drawArrows('link-arrow-start', '')
-        this._drawArrows('link-arrow-end', '50%')
+        this._drawArrows()
       }
 
       // Arc labels
@@ -643,26 +681,40 @@ export default class RadialDendrogramView extends ContrailChartsView {
       const arcLabelsPerpendicularData = (this.params.labelFlow === 'perpendicular') ? this.arcs : []
       // Along Arc
       let svgArcLabels = this.d3.selectAll('.arc-label.along-arc').data(arcLabelsAlongArcData)
-      let svgArcLabelsEnter = svgArcLabels.enter().append('text')
-        .attr('class', (d) => { return 'arc-label along-arc arc-label-'+d.height })
-        .attr('x', this.params.arcLabelXOffset)
-        .attr("dy", function(d,i) { return ((d.angleRange[0] + d.angleRange[1])/2 > 90 && (d.angleRange[0] + d.angleRange[1])/2 < 270 ? 18 : -11); })
-      svgArcLabelsEnter
-        .append('textPath')
-        .attr('xlink:href', (d) => '#' + d.data.namePath.join('-') + '-text')
-        .attr('class', function (d) { return d.data.arcType ? d.data.arcType : '' })
-      let svgArcLabelsEdit = svgArcLabelsEnter.merge(svgArcLabels).transition().ease(this.config.get('ease')).duration(this.params.labelDuration != null ? this.params.labelDuration : this.params.duration)
-      svgArcLabelsEdit.select('textPath')
-        .attr('startOffset',function(d) {
-          return d.arcLength / 2
+      svgArcLabels.enter().each(function(d, i) {
+        let labels = d.data.displayLabels.length ? d.data.displayLabels : [d.data.namePath]
+        labels = labels[labels.length-1]
+        let labelsCount = labels.length-1
+        _.each(labels, function(label, idx) {
+          if(viewScope.config.get('showArcLabels')) {
+            let labelFits = viewScope.config.get('arcLabelLetterWidth') * label.length - d.arcLength;
+            if (labelFits > 0) {
+                let labelLengthToTrim = (labelFits + 4 * viewScope.config.get('arcLabelLetterWidth')) / viewScope.config.get('arcLabelLetterWidth')
+                label = label.slice(0, -labelLengthToTrim) + '...'
+            }
+            var svgArcLabelsEnter = d3.select('svg g').append('text').attr('class', function () {
+              return 'arc-label along-arc arc-label-' + d.height
+            }).attr('x', viewScope.params.arcLabelXOffset).attr("dy", function () {
+              return (d.angleRange[0] + d.angleRange[1]) / 2 > 90 && (d.angleRange[0] + d.angleRange[1]) / 2 < 270 ? 18+ ((labelsCount - idx) * 15)  : -11 - ((labelsCount - idx) * 15)
+            })
+            svgArcLabelsEnter.append('textPath').attr('xlink:href', function () {
+              return '#' + d.data.namePath.join('-') + '-text'
+            }).attr('class', function () {
+              return d.data.arcType ? d.data.arcType : ''
+            }).attr('startOffset', function () {
+              return d.arcLength / 2
+            }).text(function () {
+              return label
+            })
+          }
         })
-        .text((d) => (this.config.get('showArcLabels') && d.labelFits) ? d.label : (d.label.slice(0,-(d.labelLengthToTrim)) + '...'))
+      })
       svgArcLabels.exit().remove()
       // Perpendicular
-      svgArcLabels = this.d3.selectAll('.arc-label.perpendicular').data(arcLabelsPerpendicularData)
-      svgArcLabelsEnter = svgArcLabels.enter().append('text')
+      let svgArcLabelsPerpendicular = this.d3.selectAll('.arc-label.perpendicular').data(arcLabelsPerpendicularData)
+      let svgArcLabelsEnter = svgArcLabelsPerpendicular.enter().append('text')
         .attr('class', (d) => { return 'arc-label perpendicular arc-label-'+d.height })
-        .merge(svgArcLabels)
+        .merge(svgArcLabelsPerpendicular)
         .attr('transform', (d) => {
           let alpha = ((d.angleRange[1] + d.angleRange[0]) / 2) + 90
           if ((d.angleRange[1] + d.angleRange[0]) / 2 < 180) {
@@ -674,7 +726,7 @@ export default class RadialDendrogramView extends ContrailChartsView {
         })
         .style('text-anchor', (d) => ((d.angleRange[1] + d.angleRange[0]) / 2 < 180) ? 'start' : 'end')
         .text((d) => (this.params.showArcLabels && d.labelFits) ? d.label : '')
-      svgArcLabels.exit().remove()
+      svgArcLabelsPerpendicular.exit().remove()
 
       // Arcs for parent nodes.
       const arcEnter = d3Shape.arc()
