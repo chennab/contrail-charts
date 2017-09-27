@@ -683,8 +683,11 @@ export default class RadialDendrogramView extends ContrailChartsView {
       let svgArcLabels = this.d3.selectAll('.arc-label.along-arc').data(arcLabelsAlongArcData)
       svgArcLabels.enter().each(function(d, i) {
         let labels = d.data.displayLabels.length ? d.data.displayLabels : [d.data.namePath]
-        labels = labels[labels.length-1]
+        labels = labels[labels.length-1].slice(0)
         let labelsCount = labels.length-1
+        if ((d.angleRange[0] + d.angleRange[1])/2 > 90 && (d.angleRange[0] + d.angleRange[1])/2 < 270) {
+          labels = labels.reverse()
+        }
         _.each(labels, function(label, idx) {
           if(viewScope.config.get('showArcLabels')) {
             let labelFits = viewScope.config.get('arcLabelLetterWidth') * label.length - d.arcLength;
